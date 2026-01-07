@@ -1,17 +1,7 @@
-
-import { useEffect } from 'react';
-import { runAllTests } from './testclassifier.js';
+import FacialAttributesClassifier from './OnnxImageClassifier.js';
 
 function App() {
-  useEffect(() => {
-    runAllTests();
-  }, []); // Esegue solo al mount
-
-  return (
-    <div className="p-8">
-      <h1>Testing in console...</h1>
-    </div>
-  );
+  return <FacialAttributesClassifier />;
 }
 
 export default App;
