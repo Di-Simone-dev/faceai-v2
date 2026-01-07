@@ -793,8 +793,14 @@ const getDominantAttributes = (attributes: Attribute[]): Attribute[] => {
                     const percentage = ((count / CONFIG.targetImages) * 100).toFixed(0);
                     const position = String(index + 1).padStart(2, ' ');
                     const attributePadded = attribute.padEnd(25, ' ');
+
+
+
                     //QUESTI SONO I DATI IMPORTANTI CHE VENGONO USATI DAL BOT
                     console.log(`${position}. ${attributePadded} ${count} (${percentage}%)`)
+                    //console.log(Object)
+
+
                     return `${position}. ${attributePadded} ${count} (${percentage}%)`;
                   })
                   .join('\n')}

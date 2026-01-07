@@ -41,7 +41,7 @@
     "moduleDetection": "force",
     "skipLibCheck": true,
     "allowJs": false,
-    "checkJs": true,
+    //"checkJs": true,
     "outDir": "dist"
 
   }
