@@ -119,7 +119,7 @@ async function testOutputFormat() {
 async function testExportResults() {
   console.log('\n=== TEST 4: Export Results ===');
   
-  const output = await classifyFacialAttributes({ numImages: 5 });
+  const output = await classifyFacialAttributes({ numImages: 24 });
   
   // Esporta come JSON
   const jsonOutput = JSON.stringify(output, null, 2);
@@ -132,7 +132,8 @@ async function testExportResults() {
     elapsedTime: output.elapsedTime
   };
   console.log('\nStatistics only:');
-  console.log(JSON.stringify(statsOnly, null, 2));
+  console.log(jsonOutput);
+  //console.log(JSON.stringify(statsOnly, null, 2));
   
   return output;
 }
@@ -145,10 +146,10 @@ export async function runAllTests() {
   
   try {
     // Esegui test in sequenza
-    await testQuickUsage();
+    //await testQuickUsage();
     //await testClassUsage();
     //await testOutputFormat();
-    //await testExportResults();
+    await testExportResults();
     
     console.log('\n✅ All tests passed!');
   } catch (error) {

@@ -330,14 +330,13 @@ export class FacialAttributesClassifier {
         onProgress(i, total);
       }
     }
-    
     const statistics = this.calculateStatistics(results);
     const elapsedTime = (Date.now() - start) / 1000;
     
     return {
       results,
       statistics,
-      elapsedTime
+      elapsedTime,
     };
   }
 }
