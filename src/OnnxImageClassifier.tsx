@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, type SetStateAction } from 'react';
 import { Play, CheckCircle, XCircle } from 'lucide-react';
 import * as ort from 'onnxruntime-web';
 
@@ -125,11 +125,17 @@ const CONFIG = {
 };
 
 function FacialAttributesClassifier() {
-  const [session, setSession] = useState(null);
-  const [results, setResults] = useState([]);
+  const [session, setSession] = useState<ort.InferenceSession | null>(null);
+  const [results, setResults] = useState<Array<{
+    imageNumber: number;
+    imageUrl: string;
+    attributes?: Array<{ name: string | undefined; probability: number; rawValue: number; index: number; displayName?: string }>;
+    success: boolean;
+    error?: string;
+  }>>([]);
   const [currentImage, setCurrentImage] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [showOnlyHighConfidence, setShowOnlyHighConfidence] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -160,13 +166,14 @@ function FacialAttributesClassifier() {
       setModelLoaded(true);
       console.log('Modello caricato con successo');
     } catch (err) {
-      setError(`Errore nel caricamento del modello: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Errore nel caricamento del modello: ${message}`);
       console.error(err);
     }
   };
-
-  const preprocessImage = async (imageUrl) => {
-    return new Promise((resolve, reject) => {
+  
+  const preprocessImage = async (imageUrl: string): Promise<ort.Tensor> => {
+    return new Promise<ort.Tensor>((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       
@@ -176,17 +183,25 @@ function FacialAttributesClassifier() {
           canvas.width = 224;
           canvas.height = 224;
           const ctx = canvas.getContext('2d');
+
+          if (!ctx) {
+            reject(new Error('Unable to obtain 2D rendering context'));
+            return;
+          }
           
           ctx.drawImage(img, 0, 0, 224, 224);
           const imageData = ctx.getImageData(0, 0, 224, 224);
-          const { data } = imageData;
+          const data = imageData.data;
           
-          const red = [], green = [], blue = [];
+          const red: number[] = [], green: number[] = [], blue: number[] = [];
           
           for (let i = 0; i < data.length; i += 4) {
-            red.push(data[i] / 255.0);
-            green.push(data[i + 1] / 255.0);
-            blue.push(data[i + 2] / 255.0);
+            const r = data[i] ?? 0;
+            const g = data[i + 1] ?? 0;
+            const b = data[i + 2] ?? 0;
+            red.push(r / 255.0);
+            green.push(g / 255.0);
+            blue.push(b / 255.0);
           }
           
           const input = new Float32Array([...red, ...green, ...blue]);
@@ -194,7 +209,7 @@ function FacialAttributesClassifier() {
           
           resolve(tensor);
         } catch (err) {
-          reject(err);
+          reject(err instanceof Error ? err : new Error(String(err)));
         }
       };
       
@@ -203,30 +218,47 @@ function FacialAttributesClassifier() {
     });
   };
 
-  const classifyImage = async (imageNumber) => {
+  const classifyImage = async (imageNumber: number, sess: ort.InferenceSession) => {
     try {
       const paddedNumber = String(imageNumber).padStart(6, '0');
-      const imageUrl = `${CONFIG.imageFolder}/${paddedNumber}.png`;
+      const imageUrl: string = `${CONFIG.imageFolder}/${paddedNumber}.png`;
       
-      const tensor = await preprocessImage(imageUrl);
+      const tensor: ort.Tensor = await preprocessImage(imageUrl);
       
-      const feeds = {};
-      feeds[session.inputNames[0]] = tensor;
+      const feeds: Record<string, ort.Tensor> = {};
+      const inputName: string | undefined = sess.inputNames && sess.inputNames.length > 0 ? sess.inputNames[0] : 'input';
+      if(inputName != undefined){
+        feeds[inputName] = tensor;
+      }
       
-      const output = await session.run(feeds);
-      const predictions = output[session.outputNames[0]].data;
+      const output: ort.InferenceSession.OnnxValueMapType = await sess.run(feeds);
+      const outputName: string | undefined = sess.outputNames && sess.outputNames.length > 0 ? sess.outputNames[0] : Object.keys(output)[0];
+      
+      if(outputName === undefined) {
+        throw new Error('Unable to determine output name');
+      }
+      
+      const outputTensor = output[outputName];
+      if(!outputTensor) {
+        throw new Error('Output tensor is undefined');
+      }
+      
+      const predictions = outputTensor.data as ArrayLike<number>;
       
       const allAttributes = [];
       for (let i = 0; i < predictions.length && i < CONFIG.attributeNames.length; i++) {
-        const probability = 1 / (1 + Math.exp(-predictions[i]));
-        allAttributes.push({
-          name: CONFIG.attributeNames[i],
-          probability: probability,
-          rawValue: predictions[i],
-          index: i
-        });
+        const pred = predictions[i];
+        if(pred !== undefined && pred !== null){
+          const probability = 1 / (1 + Math.exp(-pred));
+          allAttributes.push({
+            name: CONFIG.attributeNames[i],
+            probability: probability,
+            rawValue: pred,
+            index: i
+          });
+        }
       }
-      
+
       return {
         imageNumber,
         imageUrl,
@@ -234,10 +266,11 @@ function FacialAttributesClassifier() {
         success: true
       };
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
         imageNumber,
         imageUrl: `${CONFIG.imageFolder}/${String(imageNumber).padStart(6, '0')}.png`,
-        error: err.message,
+        error: message,
         success: false
       };
     }
@@ -248,6 +281,8 @@ function FacialAttributesClassifier() {
       setError('Carica prima il modello');
       return;
     }
+    
+    const sess = session as ort.InferenceSession;
     
     setIsProcessing(true);
     setResults([]);
@@ -260,85 +295,114 @@ function FacialAttributesClassifier() {
     
     for (let i = 1; i <= CONFIG.targetImages; i++) {
       setCurrentImage(i);
-      const result = await classifyImage(i);
+      const result = await classifyImage(i, sess);
       allResults.push(result);
       setResults(prev => [...prev, result]);
     }
     
     // Calcola le statistiche degli attributi dominanti
-    const stats = {};
+    const stats: Record<string, Set<number>> = {};
     allResults.forEach(result => {
-      if (result.success) {
+      if (result.success && result.attributes!==undefined) {
         const dominantAttrs = getDominantAttributes(result.attributes);
         dominantAttrs.forEach(attr => {
-          const key = attr.displayName || attr.name;
+          const key: string | undefined = attr.displayName || attr.name;
           // Conta solo una volta per immagine anche se appare più volte
-          if (!stats[key]) {
+          if(key!== undefined){
+                      if (!stats[key]) {
             stats[key] = new Set();
           }
           stats[key].add(result.imageNumber);
+          }
         });
       }
     });
     
     // Converti i Set in conteggi
-    const finalStats = {};
+    const finalStats: Record<string, number> = {};
     Object.keys(stats).forEach(key => {
+      if(stats[key]!==undefined)
       finalStats[key] = stats[key].size;
     });
     
     setAttributeStats(finalStats);
     
-    const totalTime = ((Date.now() - start) / 1000).toFixed(2);
+    const totalTime: SetStateAction<number> = Number(((Date.now() - start) / 1000).toFixed(2));
     setElapsedTime(totalTime);
     setIsProcessing(false);
     setCurrentImage(0);
   };
 
-  // Filtra attributi mostrando solo il dominante per gruppo
-  const getDominantAttributes = (attributes) => {
-    const dominantAttrs = [];
-    const usedIndices = new Set();
+type Attribute = {
+  name: string | undefined;
+  probability: number;
+  rawValue: number;
+  index: number;
+  displayName?: string;
+};
+
+const getDominantAttributes = (attributes: Attribute[]): Attribute[] => {
+  const dominantAttrs: Attribute[] = [];
+  const usedIndices = new Set<number>();
+  
+  for (const group of CONFIG.attributeGroups) {
+    let maxProb = -1;
+    let maxAttr: Attribute | undefined = undefined;
     
-    // Per ogni gruppo, trova l'attributo con probabilità maggiore
-    CONFIG.attributeGroups.forEach(group => {
-      let maxProb = -1;
-      let maxAttr = null;
+    for (const idx of group.indices) {
+      const attr = attributes.find((a: Attribute) => a.index === idx);
+      if (attr && attr.probability > maxProb) {
+        maxProb = attr.probability;
+        maxAttr = attr;
+      }
+    }
+    
+    if (maxAttr) {
+      const displayName = CONFIG.displayMapping[maxAttr.index as keyof typeof CONFIG.displayMapping] || maxAttr.name;
       
-      group.indices.forEach(idx => {
-        const attr = attributes.find(a => a.index === idx);
-        if (attr && attr.probability > maxProb) {
-          maxProb = attr.probability;
-          maxAttr = attr;
-        }
-      });
-      
-      if (maxAttr) {
-        // Usa il mapping per la visualizzazione se disponibile
-        const displayName = CONFIG.displayMapping[maxAttr.index] || maxAttr.name;
+      // Opzione 1: Usa solo se displayName esiste
+      if (displayName) {
         dominantAttrs.push({
-          ...maxAttr,
+          name: maxAttr.name,
+          probability: maxAttr.probability,
+          rawValue: maxAttr.rawValue,
+          index: maxAttr.index,
           displayName: displayName
         });
-        group.indices.forEach(idx => usedIndices.add(idx));
+      } else {
+        dominantAttrs.push({
+          name: maxAttr.name,
+          probability: maxAttr.probability,
+          rawValue: maxAttr.rawValue,
+          index: maxAttr.index
+        });
       }
-    });
-    
-    // Aggiungi gli attributi che non fanno parte di nessun gruppo
-    attributes.forEach(attr => {
-      if (!usedIndices.has(attr.index)) {
-        const displayName = CONFIG.displayMapping[attr.index] || attr.name;
+      
+      for (const idx of group.indices) {
+        usedIndices.add(idx);
+      }
+    }
+  }
+  
+  for (const attr of attributes) {
+    if (!usedIndices.has(attr.index)) {
+      const displayName = CONFIG.displayMapping[attr.index as keyof typeof CONFIG.displayMapping] || attr.name;
+      
+      if (displayName) {
         dominantAttrs.push({
           ...attr,
           displayName: displayName
         });
+      } else {
+        dominantAttrs.push(attr);
       }
-    });
-    
-    return dominantAttrs;
-  };
+    }
+  }
+  
+  return dominantAttrs;
+};
 
-  const getFilteredAttributes = (attributes) => {
+  const getFilteredAttributes = (attributes: Array<{ name: string | undefined; probability: number; rawValue: number; index: number; displayName?: string }>) => {
     let filtered = attributes;
     
     if (showDominantOnly) {
@@ -443,7 +507,7 @@ function FacialAttributesClassifier() {
             <h2 className="text-xl font-bold text-gray-900 mb-4">Statistiche Attributi Dominanti</h2>
             <div className="bg-gray-50 rounded-lg p-4 font-mono text-sm">
               <pre className="whitespace-pre-wrap">
-                {Object.entries(attributeStats)
+                {Object.entries(attributeStats as Record<string, number>)
                   .sort((a, b) => b[1] - a[1])
                   .map(([attribute, count], index) => {
                     const percentage = ((count / CONFIG.targetImages) * 100).toFixed(0);
@@ -460,7 +524,7 @@ function FacialAttributesClassifier() {
         {results.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {results.map((result) => {
-              const filteredAttributes = getFilteredAttributes(result.attributes);
+              const filteredAttributes = getFilteredAttributes(result.attributes || []);
               return (
                 <div key={result.imageNumber} className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow overflow-hidden">
                   <div className="relative">
@@ -469,8 +533,9 @@ function FacialAttributesClassifier() {
                       alt={`${result.imageNumber}`}
                       className="w-full aspect-square object-cover"
                       onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'flex';
+                        const target = e.target as HTMLElement;
+                        target.style.display = 'none';
+                        (target.nextSibling as HTMLElement).style.display = 'flex';
                       }}
                     />
                     <div className="hidden w-full aspect-square bg-gray-100 items-center justify-center text-gray-400 flex-col gap-2">

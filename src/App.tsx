@@ -1,4 +1,4 @@
-import FacialAttributesClassifier from './OnnxImageClassifier';
+import FacialAttributesClassifier from './OnnxImageClassifier.js';
 
 function App() {
   return <FacialAttributesClassifier />;
