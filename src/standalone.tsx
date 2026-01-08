@@ -5,7 +5,6 @@ import * as ort from 'onnxruntime-web';
  */
 const CONFIG = {
   modelPath: 'facial_attributes_model.onnx',
-  targetImages: 24,
   imageFolder: 'images_224',
   attributeNames: [
     'a man', 'a woman', 'a boy', 'a girl',
@@ -49,10 +48,31 @@ const CONFIG = {
   }
 };
 
+// Mapping domanda -> tratto -> indici attributi originali
+const QUESTION_TO_INDICES: Record<number, number[]> = {
+  0: [0, 2],           // Uomo
+  1: [1, 3],           // Donna
+  2: [4],              // Capelli biondi
+  3: [5],              // Capelli Marroni
+  4: [6],              // Capelli neri
+  5: [7],              // Capelli rossi
+  6: [10, 11, 14],     // No Capelli
+  7: [13],             // Capelli lunghi
+  8: [12],             // Capelli corti
+  9: [16],             // Capelli ricci
+  10: [15],            // Capelli lisci
+  11: [20, 21],        // Con Barba
+  12: [23],            // Occhi azzurri
+  13: [24, 25, 27],    // Occhi verdi
+  14: [22, 26],        // Occhi marroni
+  15: [38],            // Con Occhiali
+  16: [30, 32, 33]     // Con Cappello
+};
+
 /**
  * TIPI
  */
-export type Attribute = {
+type Attribute = {
   name: string | undefined;
   probability: number;
   rawValue: number;
@@ -60,22 +80,10 @@ export type Attribute = {
   displayName?: string;
 };
 
-export type ClassificationResult = {
-  imageNumber: number;
-  imageUrl: string;
-  attributes: Attribute[];
-  success: boolean;
-  error?: string;
-};
-
-export type Statistics = {
-  [attributeName: string]: number;
-};
-
-export type FacialClassificationOutput = {
-  results: ClassificationResult[];
-  statistics: Statistics;
-  elapsedTime: number;
+export type QuestionAnswer = {
+  questionId: number;
+  answer: boolean;
+  percentage: number;
 };
 
 /**
@@ -84,9 +92,6 @@ export type FacialClassificationOutput = {
 export class FacialAttributesClassifier {
   private session: ort.InferenceSession | null = null;
   
-  /**
-   * Carica il modello ONNX
-   */
   async loadModel(modelPath?: string, dataPath?: string): Promise<void> {
     const mPath = modelPath || CONFIG.modelPath;
     const dPath = dataPath || `${CONFIG.modelPath}.data`;
@@ -108,9 +113,6 @@ export class FacialAttributesClassifier {
     }
   }
   
-  /**
-   * Pre-processa un'immagine
-   */
   private async preprocessImage(imageUrl: string): Promise<ort.Tensor> {
     return new Promise<ort.Tensor>((resolve, reject) => {
       const img = new Image();
@@ -154,20 +156,70 @@ export class FacialAttributesClassifier {
     });
   }
   
+  private getDominantAttributes(attributes: Attribute[]): Map<string, number> {
+    const dominantMap = new Map<string, number>();
+    
+    // Processa i gruppi di attributi
+    for (const group of CONFIG.attributeGroups) {
+      let maxProb = -1;
+      let maxAttr: Attribute | undefined = undefined;
+      
+      for (const idx of group.indices) {
+        const attr = attributes.find(a => a.index === idx);
+        if (attr && attr.probability > maxProb) {
+          maxProb = attr.probability;
+          maxAttr = attr;
+        }
+      }
+      
+      if (maxAttr) {
+        const displayName = CONFIG.displayMapping[maxAttr.index as keyof typeof CONFIG.displayMapping];
+        if (displayName) {
+          dominantMap.set(displayName, maxAttr.probability);
+        }
+      }
+    }
+    
+    return dominantMap;
+  }
+  
   /**
-   * Classifica una singola immagine
+   * Calcola la probabilità massima per una domanda basandosi sugli indici corrispondenti
    */
-  private async classifyImage(imageNumber: number): Promise<ClassificationResult> {
+  private getQuestionProbability(questionId: number, attributes: Attribute[]): number {
+    const indices = QUESTION_TO_INDICES[questionId];
+    if (!indices || indices.length === 0) {
+      return 0;
+    }
+    
+    let maxProb = 0;
+    for (const idx of indices) {
+      const attr = attributes.find(a => a.index === idx);
+      if (attr && attr.probability > maxProb) {
+        maxProb = attr.probability;
+      }
+    }
+    
+    return maxProb;
+  }
+  
+  /**
+   * METODO CENTRALE: Classifica una singola immagine e restituisce array di 19 risposte
+   */
+  async classifyImageById(imageId: number, imageName?: string): Promise<QuestionAnswer[]> {
     if (!this.session) {
       throw new Error('Model not loaded. Call loadModel() first.');
     }
     
     try {
-      const paddedNumber = String(imageNumber).padStart(6, '0');
+      // Costruisci il path dell'immagine
+      const paddedNumber = String(imageId).padStart(6, '0');
       const imageUrl = `${CONFIG.imageFolder}/${paddedNumber}.png`;
       
+      // Pre-processa l'immagine
       const tensor = await this.preprocessImage(imageUrl);
       
+      // Esegui l'inferenza
       const feeds: Record<string, ort.Tensor> = {};
       const inputName = this.session.inputNames[0];
       if (inputName) {
@@ -188,6 +240,7 @@ export class FacialAttributesClassifier {
       
       const predictions = outputTensor.data as ArrayLike<number>;
       
+      // Crea gli attributi
       const attributes: Attribute[] = [];
       for (let i = 0; i < predictions.length && i < CONFIG.attributeNames.length; i++) {
         const pred = predictions[i];
@@ -202,162 +255,92 @@ export class FacialAttributesClassifier {
         }
       }
       
-      return {
-        imageNumber,
-        imageUrl,
-        attributes,
-        success: true
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        imageNumber,
-        imageUrl: `${CONFIG.imageFolder}/${String(imageNumber).padStart(6, '0')}.png`,
-        attributes: [],
-        success: false,
-        error: message
-      };
-    }
-  }
-  
-  /**
-   * Ottiene gli attributi dominanti
-   */
-  private getDominantAttributes(attributes: Attribute[]): Attribute[] {
-    const dominantAttrs: Attribute[] = [];
-    const usedIndices = new Set<number>();
-    
-    for (const group of CONFIG.attributeGroups) {
-      let maxProb = -1;
-      let maxAttr: Attribute | undefined = undefined;
+      // Ottieni i tratti dominanti (per determinare answer: true/false)
+      const dominantTraits = this.getDominantAttributes(attributes);
       
-      for (const idx of group.indices) {
-        const attr = attributes.find(a => a.index === idx);
-        if (attr && attr.probability > maxProb) {
-          maxProb = attr.probability;
-          maxAttr = attr;
-        }
-      }
+      // Costruisci l'array di 19 risposte (0-18)
+      const answers: QuestionAnswer[] = [];
+      const isVowel = this.startsWithVowel(imageName);
       
-      if (maxAttr) {
-        const displayName = CONFIG.displayMapping[maxAttr.index as keyof typeof CONFIG.displayMapping] || maxAttr.name;
-        
-        if (displayName) {
-          dominantAttrs.push({
-            ...maxAttr,
-            displayName
+      for (let questionId = 0; questionId <= 18; questionId++) {
+        if (questionId === 17) {
+          // "Ha un nome che inizia con una vocale?"
+          answers.push({
+            questionId,
+            answer: isVowel,
+            percentage: isVowel ? 100 : 0
+          });
+        } else if (questionId === 18) {
+          // "Ha un nome che inizia con una consonante?"
+          answers.push({
+            questionId,
+            answer: !isVowel,
+            percentage: !isVowel ? 100 : 0
           });
         } else {
-          dominantAttrs.push(maxAttr);
-        }
-        
-        for (const idx of group.indices) {
-          usedIndices.add(idx);
-        }
-      }
-    }
-    
-    for (const attr of attributes) {
-      if (!usedIndices.has(attr.index)) {
-        const displayName = CONFIG.displayMapping[attr.index as keyof typeof CONFIG.displayMapping] || attr.name;
-        if (displayName) {
-          dominantAttrs.push({ ...attr, displayName });
-        } else {
-          dominantAttrs.push(attr);
-        }
-      }
-    }
-    
-    return dominantAttrs;
-  }
-  
-  /**
-   * Calcola le statistiche
-   */
-  private calculateStatistics(results: ClassificationResult[]): Statistics {
-    const stats: Record<string, Set<number>> = {};
-    
-    results.forEach(result => {
-      if (result.success && result.attributes) {
-        const dominantAttrs = this.getDominantAttributes(result.attributes);
-        dominantAttrs.forEach(attr => {
-          const key = attr.displayName || attr.name;
-          if (key) {
-            if (!stats[key]) {
-              stats[key] = new Set();
+          // Attributi canonici
+          // answer: true se è dominante
+          // percentage: sempre la probabilità reale (anche se non dominante)
+          const indices = QUESTION_TO_INDICES[questionId];
+          if (indices) {
+            const probability = this.getQuestionProbability(questionId, attributes);
+            const percentage = Math.round(probability * 100);
+            
+            // Determina se la risposta è true controllando se corrisponde a un tratto dominante
+            const trait = Object.keys(QUESTION_TO_INDICES).find(key => 
+              parseInt(key) === questionId
+            );
+            let answer = false;
+            if (trait) {
+              // Cerca il display name corrispondente verificando gli indici
+              for (const [displayName, prob] of dominantTraits.entries()) {
+                // Verifica se questo displayName corrisponde a questa domanda
+                const displayIndices = indices.map(idx => 
+                  CONFIG.displayMapping[idx as keyof typeof CONFIG.displayMapping]
+                );
+                if (displayIndices.includes(displayName)) {
+                  answer = true;
+                  break;
+                }
+              }
             }
-            stats[key].add(result.imageNumber);
+            
+            answers.push({
+              questionId,
+              answer,
+              percentage
+            });
           }
-        });
-      }
-    });
-    
-    const finalStats: Statistics = {};
-    Object.keys(stats).forEach(key => {
-        if(stats[key]!==undefined){
-            finalStats[key] = stats[key].size;
         }
-    });
-    
-    return finalStats;
+      }
+      
+      return answers;
+      
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to classify image ${imageId}: ${message}`);
+    }
   }
   
-  /**
-   * FUNZIONE PRINCIPALE: Classifica tutte le immagini
-   */
-  async classifyAll(
-    numImages?: number,
-    imageFolder?: string,
-    onProgress?: (current: number, total: number) => void
-  ): Promise<FacialClassificationOutput> {
-    if (!this.session) {
-      throw new Error('Model not loaded. Call loadModel() first.');
-    }
-    
-    const total = numImages || CONFIG.targetImages;
-    if (imageFolder) {
-      CONFIG.imageFolder = imageFolder;
-    }
-    
-    const start = Date.now();
-    const results: ClassificationResult[] = [];
-    
-    for (let i = 1; i <= total; i++) {
-      const result = await this.classifyImage(i);
-      results.push(result);
-      
-      if (onProgress) {
-        onProgress(i, total);
-      }
-    }
-    const statistics = this.calculateStatistics(results);
-    const elapsedTime = (Date.now() - start) / 1000;
-    
-    return {
-      results,
-      statistics,
-      elapsedTime,
-    };
+  private startsWithVowel(name?: string): boolean {
+    if (!name) return false;
+    const firstChar = name.charAt(0).toLowerCase();
+    return ['a', 'e', 'i', 'o', 'u'].includes(firstChar);
   }
 }
 
 /**
- * FUNZIONE DI UTILITÀ: Uso rapido
+ * FUNZIONE DI UTILITÀ
  */
-export async function classifyFacialAttributes(
+export async function classifyImageById(
+  imageId: number,
+  imageName?: string,
   options?: {
     modelPath?: string;
     dataPath?: string;
-    numImages?: number;
-    imageFolder?: string;
-    onProgress?: (current: number, total: number) => void;
   }
-): Promise<FacialClassificationOutput> {
+): Promise<QuestionAnswer[]> {
   const classifier = new FacialAttributesClassifier();
   await classifier.loadModel(options?.modelPath, options?.dataPath);
-  return await classifier.classifyAll(
-    options?.numImages,
-    options?.imageFolder,
-    options?.onProgress
-  );
+  return await classifier.classifyImageById(imageId, imageName);
 }
