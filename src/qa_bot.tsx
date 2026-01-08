@@ -32,7 +32,32 @@ const CONFIG = {
 };
 
 /**
- * TIPO: Attributo dominante con tutte le info
+ * MAPPING DOMANDE -> TRATTI
+ */
+const QUESTION_TO_TRAIT_MAPPING: Record<number, string> = {
+  0: 'Uomo',                     // "È un uomo?"
+  1: 'Donna',                    // "È una donna?"
+  2: 'Capelli biondi',           // "Ha i capelli biondi?"
+  3: 'Capelli Marroni',          // "Ha i capelli castani?"
+  4: 'Capelli neri',             // "Ha i capelli neri?"
+  5: 'Capelli rossi',            // "Ha i capelli rossi?"
+  6: 'No Capelli',               // "È calvo/a?"
+  7: 'Capelli lunghi',           // "Ha i capelli lunghi?"
+  8: 'Capelli corti',            // "Ha i capelli corti?"
+  9: 'Capelli ricci',            // "Ha i capelli ricci?"
+  10: 'Capelli lisci',           // "Ha i capelli lisci?"
+  11: 'Con Barba',               // "Ha la barba?"
+  12: 'Occhi azzurri',           // "Ha gli occhi azzurri?"
+  13: 'Occhi verdi',             // "Ha gli occhi verdi?"
+  14: 'Occhi marroni',           // "Ha gli occhi marroni?"
+  15: 'Con Occhiali',            // "Porta gli occhiali?"
+  16: 'Con Cappello',            // "Porta un cappello?"
+  17: 'Vocale',                  // "Ha un nome che inizia con una vocale?"
+  18: 'Consonante'               // "Ha un nome che inizia con una consonante?"
+};
+
+/**
+ * TIPI
  */
 export type DominantAttribute = {
   group: string;
@@ -42,27 +67,27 @@ export type DominantAttribute = {
   index: number;
 };
 
-/**
- * TIPO: Attributi dominanti per una singola immagine
- */
 export type ImageDominantAttributes = {
   imageId: number;
   imageUrl: string;
   dominantAttributes: DominantAttribute[];
 };
 
-/**
- * TIPO: Output JSON completo
- */
 export type DominantAttributesJSON = {
   totalImages: number;
   elapsedTime: number;
   images: ImageDominantAttributes[];
 };
 
+export type TraitCheckResult = {
+  hasTrait: boolean;
+  percentage: number;
+};
+
 /**
- * Trova l'attributo dominante in un gruppo
+ * FUNZIONI INTERNE
  */
+
 function getDominantInGroup(
   attributes: Attribute[], 
   groupName: string,
@@ -94,9 +119,6 @@ function getDominantInGroup(
   };
 }
 
-/**
- * Estrae tutti gli attributi dominanti da un risultato di classificazione
- */
 function extractDominantAttributes(result: ClassificationResult): ImageDominantAttributes {
   const dominantAttributes: DominantAttribute[] = [];
   
@@ -116,146 +138,32 @@ function extractDominantAttributes(result: ClassificationResult): ImageDominantA
   };
 }
 
-/**
- * FUNZIONE PRINCIPALE: Genera JSON con tutti gli attributi dominanti
- * 
- * @param numImages - Numero di immagini da processare (default: 24)
- * @param imageFolder - Cartella delle immagini (default: 'images_224')
- * @returns JSON con tutti gli attributi dominanti per ogni immagine
- */
-export async function generateDominantAttributesJSON(
+async function generateDominantAttributesJSON(
   numImages: number = 24,
   imageFolder: string = 'images_224'
 ): Promise<DominantAttributesJSON> {
-  console.log('🚀 Starting classification...');
-  
-  // Classifica tutte le immagini
   const output = await classifyFacialAttributes({
     numImages,
     imageFolder,
-    onProgress: (current: number, total:number) => {
+    onProgress: (current: number, total: number) => {
       console.log(`📸 Processing ${current}/${total}`);
     }
   });
   
-  console.log('✅ Classification completed!');
-  console.log('📊 Extracting dominant attributes...');
-  
-  // Estrai attributi dominanti per ogni immagine
   const images = output.results.map(result => extractDominantAttributes(result));
   
-  const json: DominantAttributesJSON = {
+  return {
     totalImages: output.results.length,
     elapsedTime: output.elapsedTime,
     images
   };
-  
-  console.log('✅ JSON generated!');
-  
-  return json;
 }
 
-/**
- * FUNZIONE UTILITÀ: Salva il JSON come stringa formattata
- */
-export function jsonToString(json: DominantAttributesJSON, prettify: boolean = true): string {
-  return JSON.stringify(json, null, prettify ? 2 : 0);
-}
-
-/**
- * FUNZIONE UTILITÀ: Download del JSON come file
- */
-export function downloadJSON(json: DominantAttributesJSON, filename: string = 'dominant_attributes.json'): void {
-  const jsonString = jsonToString(json, true);
-  const blob = new Blob([jsonString], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  
-  URL.revokeObjectURL(url);
-  console.log(`✅ JSON downloaded as ${filename}`);
-}
-
-/**
- * FUNZIONE UTILITÀ: Trova un'immagine specifica nel JSON
- */
-export function findImageById(json: DominantAttributesJSON, imageId: number): ImageDominantAttributes | undefined {
-  return json.images.find(img => img.imageId === imageId);
-}
-
-/**
- * FUNZIONE UTILITÀ: Filtra immagini per attributo specifico
- */
-export function filterByAttribute(
-  json: DominantAttributesJSON, 
-  groupName: string, 
-  attributeValue: string
-): ImageDominantAttributes[] {
-  return json.images.filter(img => {
-    const attr = img.dominantAttributes.find(a => a.group === groupName);
-    return attr && attr.attribute === attributeValue;
-  });
-}
-
-/**
- * MAPPING DOMANDE -> TRATTI
- * Ogni indice corrisponde a una domanda e al relativo tratto da verificare
- */
-const QUESTION_TO_TRAIT_MAPPING: Record<number, string | null> = {
-  0: 'Uomo',                    // "È un uomo?"
-  1: 'Donna',                   // "È una donna?"
-  2: 'Capelli biondi',           // "Ha i capelli biondi?"
-  3: 'Capelli marroni',          // "Ha i capelli castani?"
-  4: 'Capelli neri',             // "Ha i capelli neri?"
-  5: 'Capelli rossi',            // "Ha i capelli rossi?"
-  6: 'No Capelli',               // "È calvo/a?"
-  7: 'Capelli lunghi',           // "Ha i capelli lunghi?"
-  8: 'Capelli corti',            // "Ha i capelli corti?"
-  9: 'Capelli ricci',            // "Ha i capelli ricci?"
-  10: 'Capelli lisci',            // "Ha i capelli lisci?"
-  11: 'Con Barba',                // "Ha la barba?"
-  12: 'Occhi azzurri',           // "Ha gli occhi azzurri?"
-  13: 'Occhi verdi',             // "Ha gli occhi verdi?"
-  14: 'Occhi marroni',           // "Ha gli occhi marroni?"
-  15: 'Con Occhiali',            // "Porta gli occhiali?"
-  16: 'Con Cappello',            // "Porta un cappello?"
-  17: 'Vocale',                      // "Ha un nome che inizia con una vocale?" - non classificabile
-  18: 'Consonante'                       // "Ha un nome che inizia con una consonante?" - non classificabile
-};
-
-/**
- * TIPO: Risultato del controllo tratto
- */
-export type TraitCheckResult = {
-  hasTrait: boolean;
-  percentage: number;
-};
-
-/**
- * FUNZIONE PRINCIPALE: Controlla se un'immagine ha un tratto dominante specifico
- * 
- * @param json - JSON con tutti gli attributi dominanti
- * @param imageId - ID dell'immagine (1-24)
- * @param trait - Tratto da verificare (es: 'Uomo', 'Capelli neri', 'Con Occhiali')
- * @returns Oggetto con hasTrait (boolean) e percentage (number)
- * 
- * @example
- * const json = await generateDominantAttributesJSON();
- * hasTrait(json, 1, 'Uomo');           // { hasTrait: true, percentage: 92 }
- * hasTrait(json, 5, 'Con Occhiali');   // { hasTrait: false, percentage: 0 }
- * hasTrait(json, 12, 'Capelli neri');  // { hasTrait: true, percentage: 87 }
- */
-export function hasTrait(
+function hasTrait(
   json: DominantAttributesJSON,
   imageId: number,
   trait: string
 ): TraitCheckResult {
-  // Trova l'immagine
   const image = json.images.find(img => img.imageId === imageId);
   
   if (!image) {
@@ -263,7 +171,6 @@ export function hasTrait(
     return { hasTrait: false, percentage: 0 };
   }
   
-  // Cerca il tratto negli attributi dominanti
   const attribute = image.dominantAttributes.find(attr => attr.attribute === trait);
   
   if (attribute) {
@@ -277,131 +184,86 @@ export function hasTrait(
 }
 
 /**
- * FUNZIONE CON INDICE DOMANDA: Controlla un tratto usando l'indice della domanda
+ * FUNZIONE PRINCIPALE ESPORTATA
  * 
- * @param json - JSON con tutti gli attributi dominanti
+ * Controlla se un'immagine ha un tratto specifico usando l'indice della domanda
+ * 
  * @param imageId - ID dell'immagine (1-24)
- * @param questionIndex - Indice della domanda (0-19)
- * @returns Oggetto con hasTrait (boolean) e percentage (number), o null se la domanda non è classificabile
+ * @param questionIndex - Indice della domanda (0-18)
+ * @param characterName - Nome del personaggio (necessario solo per domande 17-18)
+ * @param json - JSON precaricato (opzionale, se non fornito verrà generato)
+ * @returns { hasTrait: boolean, percentage: number } o null se errore
  * 
  * @example
- * const json = await generateDominantAttributesJSON();
- * hasTraitByQuestion(json, 1, 0);   // { hasTrait: true, percentage: 85 } - capelli biondi
- * hasTraitByQuestion(json, 1, 16);  // { hasTrait: true, percentage: 92 } - uomo
- * hasTraitByQuestion(json, 1, 14);  // { hasTrait: false, percentage: 0 } - occhiali
- * hasTraitByQuestion(json, 1, 18);  // null - domanda non classificabile
+ * // Con JSON precaricato (consigliato per performance)
+ * const json = await generateJSON();
+ * const result = await hasTraitByQuestion(1, 0, 'Mario', json);  // { hasTrait: true, percentage: 92 }
+ * 
+ * // Senza JSON precaricato (genera al volo)
+ * const result = await hasTraitByQuestion(1, 0, 'Mario');
  */
-export function hasTraitByQuestion(
-  json: DominantAttributesJSON,
+export async function hasTraitByQuestion(
   imageId: number,
-  questionIndex: number
-): TraitCheckResult | null {
+  questionIndex: number,
+  characterName: string,
+  json?: DominantAttributesJSON
+): Promise<TraitCheckResult | null> {
+  // Genera il JSON se non è stato fornito
+  if (!json) {
+    console.log('⚠️ JSON not provided, generating now (this may take time)...');
+    json = await generateDominantAttributesJSON();
+  }
+  
   // Ottieni il tratto dal mapping
   const trait = QUESTION_TO_TRAIT_MAPPING[questionIndex];
-  const name:string = "Valerio"  //TEMPORANEO, DA SOSTITUIRE
-  // Se la domanda non è mappabile a un tratto visivo, ritorna null 
-  if (trait === null || trait === undefined) {
-    console.warn(`Question ${questionIndex} is not classifiable`);
+  
+  if (!trait) {
+    console.warn(`Question ${questionIndex} is not mapped`);
     return null;
   }
-  if(questionIndex>-1 && questionIndex <17){  //nel caso di tratti visivi
+  
+  // Gestisci domande sui tratti visivi (0-16)
+  if (questionIndex >= 0 && questionIndex <= 16) {
     return hasTrait(json, imageId, trait);
   }
-  else return {
-      hasTrait: /^[aeiou]/i.test(name),  //metodo veloce case insensitive regex 
+  
+  // Gestisci domande sul nome (17-18)
+  const firstName = characterName.trim()[0]?.toLowerCase();
+  
+  if (!firstName) {
+    console.warn('Invalid character name');
+    return { hasTrait: false, percentage: 0 };
+  }
+  
+  const isVowel = ['a', 'e', 'i', 'o', 'u'].includes(firstName);
+  
+  if (questionIndex === 17) {
+    // "Ha un nome che inizia con una vocale?"
+    return {
+      hasTrait: isVowel,
       percentage: 100
-    }; 
-  // Usa la funzione hasTrait con il tratto mappato
+    };
+  }
   
+  if (questionIndex === 18) {
+    // "Ha un nome che inizia con una consonante?"
+    return {
+      hasTrait: !isVowel,
+      percentage: 100
+    };
+  }
+  
+  return null;
 }
 
 /**
- * FUNZIONE BATCH: Verifica multiple domande per un'immagine
- * 
- * @param json - JSON con tutti gli attributi dominanti
- * @param imageId - ID dell'immagine (1-24)
- * @param questionIndices - Array di indici di domande da verificare
- * @returns Array di risultati (null per domande non classificabili)
- * 
- * @example
- * hasTraitsByQuestions(json, 1, [0, 2, 14, 16]);
- * // [
- * //   { hasTrait: false, percentage: 15 },  // capelli biondi
- * //   { hasTrait: true, percentage: 87 },   // capelli neri
- * //   { hasTrait: true, percentage: 91 },   // occhiali
- * //   { hasTrait: true, percentage: 92 }    // uomo
- * // ]
+ * FUNZIONE HELPER: Genera e ritorna il JSON
+ * Utile per precaricare il JSON e riutilizzarlo con hasTraitByQuestion
  */
-export function hasTraitsByQuestions(
-  json: DominantAttributesJSON,
-  imageId: number,
-  questionIndices: number[]
-): (TraitCheckResult | null)[] {
-  return questionIndices.map(index => hasTraitByQuestion(json, imageId, index));
-}
-
-/**
- * FUNZIONE UTILITÀ: Ottieni il tratto associato a un indice domanda
- * 
- * @param questionIndex - Indice della domanda (0-19)
- * @returns Il tratto associato o null se non classificabile
- */
-export function getTraitForQuestion(questionIndex: number): string | null {
-  return QUESTION_TO_TRAIT_MAPPING[questionIndex] ?? null;
-}
-
-/**
- * ESEMPIO DI USO
- */
-export async function example() {
-  // Genera il JSON
-  const json = await generateDominantAttributesJSON(24, 'images_224');
-  
-  // Stampa il JSON
-  console.log('📄 JSON Output:');
-  console.log(jsonToString(json));
-  
-  // Download del file
-  downloadJSON(json);
-  
-  // ===== ESEMPIO FUNZIONE hasTrait =====
-  console.log('\n🔍 Testing hasTrait function:');
-  
-  const result1 = hasTrait(json, 1, 'Uomo');
-  console.log('Image 1 is Uomo?', result1);
-  
-  // ===== ESEMPIO FUNZIONE hasTraitByQuestion =====
-  console.log('\n🔍 Testing hasTraitByQuestion (con indici):');
-  
-  const q0 = hasTraitByQuestion(json, 1, 0);   // "È un uomo?"
-  console.log('Q0 - È un uomo?', q0);
-
-  const q1 = hasTraitByQuestion(json, 1, 1);   // "È un uomo?"
-  console.log('Q1 - È una donna?', q0);
-  
-  const q2 = hasTraitByQuestion(json, 1, 2);   // "Ha i capelli neri?"
-  console.log('Q2 - Ha i capelli biondi?', q2);
-  
-  const q17 = hasTraitByQuestion(json, 1, 17); // "Ha un nome che inizia con una vocale?"
-  console.log('Q17 - Vocale?', q17); 
-
-  const q18 = hasTraitByQuestion(json, 1, 18); // "Ha un nome che inizia con una vocale?"
-  console.log('Q18 - Consonante?', q18); 
-  
-  // ===== ESEMPIO BATCH =====
- /* console.log('\n🔍 Testing batch questions:');
-  const batchResults = hasTraitsByQuestions(json, 1, [0, 2, 14, 16]);
-  console.log('Batch results:', batchResults);
-  
-  // Query avanzate
-  const image5 = findImageById(json, 5);
-  console.log('\nImage 5 attributes:', image5);
-  
-  const menImages = filterByAttribute(json, 'Gender', 'Uomo');
-  console.log(`\nFound ${menImages.length} men`);
-  
-  const withGlasses = filterByAttribute(json, 'Eyeglasses', 'Con Occhiali');
-  console.log(`Found ${withGlasses.length} people with glasses`); */
-  
-  return json;
+export async function generateJSON(
+  numImages: number = 24,
+  imageFolder: string = 'images_224'
+): Promise<DominantAttributesJSON> {
+  console.log('🚀 Generating dominant attributes JSON...');
+  return await generateDominantAttributesJSON(numImages, imageFolder);
 }
