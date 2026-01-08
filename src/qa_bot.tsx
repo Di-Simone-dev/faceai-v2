@@ -203,34 +203,151 @@ export function filterByAttribute(
 }
 
 /**
+ * MAPPING DOMANDE -> TRATTI
+ * Ogni indice corrisponde a una domanda e al relativo tratto da verificare
+ */
+const QUESTION_TO_TRAIT_MAPPING: Record<number, string | null> = {
+  0: 'Uomo',                    // "È un uomo?"
+  1: 'Donna',                   // "È una donna?"
+  2: 'Capelli biondi',           // "Ha i capelli biondi?"
+  3: 'Capelli marroni',          // "Ha i capelli castani?"
+  4: 'Capelli neri',             // "Ha i capelli neri?"
+  5: 'Capelli rossi',            // "Ha i capelli rossi?"
+  6: 'No Capelli',               // "È calvo/a?"
+  7: 'Capelli lunghi',           // "Ha i capelli lunghi?"
+  8: 'Capelli corti',            // "Ha i capelli corti?"
+  9: 'Capelli ricci',            // "Ha i capelli ricci?"
+  10: 'Capelli lisci',            // "Ha i capelli lisci?"
+  11: 'Con Barba',                // "Ha la barba?"
+  12: 'Occhi azzurri',           // "Ha gli occhi azzurri?"
+  13: 'Occhi verdi',             // "Ha gli occhi verdi?"
+  14: 'Occhi marroni',           // "Ha gli occhi marroni?"
+  15: 'Con Occhiali',            // "Porta gli occhiali?"
+  16: 'Con Cappello',            // "Porta un cappello?"
+  17: 'Vocale',                      // "Ha un nome che inizia con una vocale?" - non classificabile
+  18: 'Consonante'                       // "Ha un nome che inizia con una consonante?" - non classificabile
+};
+
+/**
+ * TIPO: Risultato del controllo tratto
+ */
+export type TraitCheckResult = {
+  hasTrait: boolean;
+  percentage: number;
+};
+
+/**
  * FUNZIONE PRINCIPALE: Controlla se un'immagine ha un tratto dominante specifico
  * 
  * @param json - JSON con tutti gli attributi dominanti
  * @param imageId - ID dell'immagine (1-24)
  * @param trait - Tratto da verificare (es: 'Uomo', 'Capelli neri', 'Con Occhiali')
- * @returns true se il tratto è dominante, false altrimenti
+ * @returns Oggetto con hasTrait (boolean) e percentage (number)
  * 
  * @example
  * const json = await generateDominantAttributesJSON();
- * hasTrait(json, 1, 'Uomo');           // true o false
- * hasTrait(json, 5, 'Con Occhiali');   // true o false
- * hasTrait(json, 12, 'Capelli neri');  // true o false
+ * hasTrait(json, 1, 'Uomo');           // { hasTrait: true, percentage: 92 }
+ * hasTrait(json, 5, 'Con Occhiali');   // { hasTrait: false, percentage: 0 }
+ * hasTrait(json, 12, 'Capelli neri');  // { hasTrait: true, percentage: 87 }
  */
 export function hasTrait(
   json: DominantAttributesJSON,
   imageId: number,
   trait: string
-): boolean {
+): TraitCheckResult {
   // Trova l'immagine
   const image = json.images.find(img => img.imageId === imageId);
   
   if (!image) {
     console.warn(`Image ${imageId} not found`);
-    return false;
+    return { hasTrait: false, percentage: 0 };
   }
   
   // Cerca il tratto negli attributi dominanti
-  return image.dominantAttributes.some(attr => attr.attribute === trait);
+  const attribute = image.dominantAttributes.find(attr => attr.attribute === trait);
+  
+  if (attribute) {
+    return {
+      hasTrait: true,
+      percentage: attribute.percentage
+    };
+  }
+  
+  return { hasTrait: false, percentage: 0 };
+}
+
+/**
+ * FUNZIONE CON INDICE DOMANDA: Controlla un tratto usando l'indice della domanda
+ * 
+ * @param json - JSON con tutti gli attributi dominanti
+ * @param imageId - ID dell'immagine (1-24)
+ * @param questionIndex - Indice della domanda (0-19)
+ * @returns Oggetto con hasTrait (boolean) e percentage (number), o null se la domanda non è classificabile
+ * 
+ * @example
+ * const json = await generateDominantAttributesJSON();
+ * hasTraitByQuestion(json, 1, 0);   // { hasTrait: true, percentage: 85 } - capelli biondi
+ * hasTraitByQuestion(json, 1, 16);  // { hasTrait: true, percentage: 92 } - uomo
+ * hasTraitByQuestion(json, 1, 14);  // { hasTrait: false, percentage: 0 } - occhiali
+ * hasTraitByQuestion(json, 1, 18);  // null - domanda non classificabile
+ */
+export function hasTraitByQuestion(
+  json: DominantAttributesJSON,
+  imageId: number,
+  questionIndex: number
+): TraitCheckResult | null {
+  // Ottieni il tratto dal mapping
+  const trait = QUESTION_TO_TRAIT_MAPPING[questionIndex];
+  const name:string = "Valerio"  //TEMPORANEO, DA SOSTITUIRE
+  // Se la domanda non è mappabile a un tratto visivo, ritorna null 
+  if (trait === null || trait === undefined) {
+    console.warn(`Question ${questionIndex} is not classifiable`);
+    return null;
+  }
+  if(questionIndex>-1 && questionIndex <17){  //nel caso di tratti visivi
+    return hasTrait(json, imageId, trait);
+  }
+  else return {
+      hasTrait: /^[aeiou]/i.test(name),  //metodo veloce case insensitive regex 
+      percentage: 100
+    }; 
+  // Usa la funzione hasTrait con il tratto mappato
+  
+}
+
+/**
+ * FUNZIONE BATCH: Verifica multiple domande per un'immagine
+ * 
+ * @param json - JSON con tutti gli attributi dominanti
+ * @param imageId - ID dell'immagine (1-24)
+ * @param questionIndices - Array di indici di domande da verificare
+ * @returns Array di risultati (null per domande non classificabili)
+ * 
+ * @example
+ * hasTraitsByQuestions(json, 1, [0, 2, 14, 16]);
+ * // [
+ * //   { hasTrait: false, percentage: 15 },  // capelli biondi
+ * //   { hasTrait: true, percentage: 87 },   // capelli neri
+ * //   { hasTrait: true, percentage: 91 },   // occhiali
+ * //   { hasTrait: true, percentage: 92 }    // uomo
+ * // ]
+ */
+export function hasTraitsByQuestions(
+  json: DominantAttributesJSON,
+  imageId: number,
+  questionIndices: number[]
+): (TraitCheckResult | null)[] {
+  return questionIndices.map(index => hasTraitByQuestion(json, imageId, index));
+}
+
+/**
+ * FUNZIONE UTILITÀ: Ottieni il tratto associato a un indice domanda
+ * 
+ * @param questionIndex - Indice della domanda (0-19)
+ * @returns Il tratto associato o null se non classificabile
+ */
+export function getTraitForQuestion(questionIndex: number): string | null {
+  return QUESTION_TO_TRAIT_MAPPING[questionIndex] ?? null;
 }
 
 /**
@@ -250,10 +367,31 @@ export async function example() {
   // ===== ESEMPIO FUNZIONE hasTrait =====
   console.log('\n🔍 Testing hasTrait function:');
   
-  console.log('Image 1 is Uomo?', hasTrait(json, 1, 'Uomo'));
-  /*console.log('Image 1 has Occhiali?', hasTrait(json, 1, 'Con Occhiali'));
-  console.log('Image 5 has Cappello?', hasTrait(json, 5, 'Con Cappello'));
-  console.log('Image 12 has Capelli neri?', hasTrait(json, 12, 'Capelli neri'));
+  const result1 = hasTrait(json, 1, 'Uomo');
+  console.log('Image 1 is Uomo?', result1);
+  
+  // ===== ESEMPIO FUNZIONE hasTraitByQuestion =====
+  console.log('\n🔍 Testing hasTraitByQuestion (con indici):');
+  
+  const q0 = hasTraitByQuestion(json, 1, 0);   // "È un uomo?"
+  console.log('Q0 - È un uomo?', q0);
+
+  const q1 = hasTraitByQuestion(json, 1, 1);   // "È un uomo?"
+  console.log('Q1 - È una donna?', q0);
+  
+  const q2 = hasTraitByQuestion(json, 1, 2);   // "Ha i capelli neri?"
+  console.log('Q2 - Ha i capelli biondi?', q2);
+  
+  const q17 = hasTraitByQuestion(json, 1, 17); // "Ha un nome che inizia con una vocale?"
+  console.log('Q17 - Vocale?', q17); 
+
+  const q18 = hasTraitByQuestion(json, 1, 18); // "Ha un nome che inizia con una vocale?"
+  console.log('Q18 - Consonante?', q18); 
+  
+  // ===== ESEMPIO BATCH =====
+ /* console.log('\n🔍 Testing batch questions:');
+  const batchResults = hasTraitsByQuestions(json, 1, [0, 2, 14, 16]);
+  console.log('Batch results:', batchResults);
   
   // Query avanzate
   const image5 = findImageById(json, 5);
@@ -263,7 +401,7 @@ export async function example() {
   console.log(`\nFound ${menImages.length} men`);
   
   const withGlasses = filterByAttribute(json, 'Eyeglasses', 'Con Occhiali');
-  console.log(`Found ${withGlasses.length} people with glasses`);*/
+  console.log(`Found ${withGlasses.length} people with glasses`); */
   
   return json;
 }
