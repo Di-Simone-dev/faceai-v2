@@ -360,7 +360,7 @@ function FacialAttributesClassifier() {
    * L'esecuzione avviene su WebGPU (se abilitato) o WASM.
    * 
    * Processo:
-   * 1. Costruisce il percorso dell'immagine con zero-padding (es. 000001.png)
+   * 1. Costruisce il percorso dell'immagine con zero-padding (es. 000001.jpg)
    * 2. Pre-processa l'immagine in un tensore
    * 3. Esegue l'inferenza con il modello ONNX (WebGPU o WASM)
    * 4. Applica la funzione sigmoide agli output per ottenere probabilità [0-1]
@@ -373,7 +373,7 @@ function FacialAttributesClassifier() {
   const classifyImage = async (imageNumber: number, sess: ort.InferenceSession) => {
     try {
       const paddedNumber = String(imageNumber).padStart(6, '0');
-      const imageUrl: string = `${CONFIG.imageFolder}/${paddedNumber}.png`;
+      const imageUrl: string = `${CONFIG.imageFolder}/${paddedNumber}.jpg`;
       
       const tensor: ort.Tensor = await preprocessImage(imageUrl);
       
@@ -382,7 +382,7 @@ function FacialAttributesClassifier() {
       if(inputName != undefined){
         feeds[inputName] = tensor;
       }
-      
+      console.log("feeds",feeds);
       // Esegue l'inferenza (WebGPU accelererà questo passaggio se abilitato)
       const output: ort.InferenceSession.OnnxValueMapType = await sess.run(feeds);
       
@@ -423,7 +423,7 @@ function FacialAttributesClassifier() {
       const message = err instanceof Error ? err.message : String(err);
       return {
         imageNumber,
-        imageUrl: `${CONFIG.imageFolder}/${String(imageNumber).padStart(6, '0')}.png`,
+        imageUrl: `${CONFIG.imageFolder}/${String(imageNumber).padStart(6, '0')}.jpg`,
         error: message,
         success: false
       };
@@ -564,6 +564,13 @@ const getDominantAttributes = (attributes: Attribute[]): Attribute[] => {
   
   for (const attr of attributes) {
     if (!usedIndices.has(attr.index)) {
+      // Attributi 0 (Sorriso), 16 (Con Barba), 17 (Con Occhiali) devono avere probabilità >50%
+      const requiresHighConfidence = [0, 16, 17].includes(attr.index);
+      
+      if (requiresHighConfidence && attr.probability <= 0.5) {
+        continue; // Salta questo attributo se non raggiunge il 50%
+      }
+      
       const displayName = CONFIG.displayMapping[attr.index as keyof typeof CONFIG.displayMapping] || attr.name;
       
       if (displayName) {
@@ -803,7 +810,7 @@ const getDominantAttributes = (attributes: Attribute[]): Attribute[] => {
                         <circle cx="8.5" cy="8.5" r="1.5"></circle>
                         <polyline points="21 15 16 10 5 21"></polyline>
                       </svg>
-                      <span className="text-xs">{String(result.imageNumber).padStart(6, '0')}.png</span>
+                      <span className="text-xs">{String(result.imageNumber).padStart(6, '0')}.jpg</span>
                     </div>
                     {/* Badge con il numero dell'immagine */}
                     <div className="absolute top-1.5 right-1.5 bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded text-xs font-semibold text-gray-700">
@@ -870,4 +877,4 @@ const getDominantAttributes = (attributes: Attribute[]): Attribute[] => {
   );
 }
 
-export default FacialAttributesClassifier;
+export default FacialAttributesClassifier;  

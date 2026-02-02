@@ -1,5 +1,4 @@
 import * as ort from 'onnxruntime-web';
-
 /**
  * CONFIGURAZIONE
  */
@@ -52,33 +51,31 @@ const CONFIG = {
     15: 'Occhi Verdi',
     16: 'Con Barba',
     17: 'Con Occhiali'
-  }
-};
-
-// Mapping domanda -> tratto -> indici attributi originali
-const QUESTION_TO_INDICES: Record<number, number[]> = {
-  0: [0],              // Sorriso (aggiunto dal nuovo modello)
-  1: [1],              // Uomo
-  2: [2],              // Donna
-  3: [3],              // Capelli Marroni
-  4: [4],              // Capelli neri
-  5: [5],              // Capelli biondi
-  6: [6],              // Capelli grigi (come "capelli rossi" nel vecchio)   PELATO DA AGGIUNGERE IN CASO IN SEGUITO
-  7: [7],              // Capelli lunghi
-  8: [8],              // Capelli corti
-  9: [9],              // Etnia asiatico
-  10: [10],            // Etnia africano
-  11: [11],            // Etnia latino
-  12: [12],            // Etnia caucasica
-  13: [13],            // Occhi azzurri
-  14: [14],            // Occhi marroni
-  15: [15],            // Occhi verdi
-  16: [16],           // Con Barba
-  17: [17],            // Con Occhiali          CAPPELLO DA AGGIUNGERE IN CASO IN SEGUITO
-    //Domande sulle lettere non presenti qui 
-
-};
-
+  },
+  // Mapping domanda -> tratto -> indici attributi originali
+  questionToIndices: {
+    0: [0],              // Sorriso (aggiunto dal nuovo modello)
+    1: [1],              // Uomo
+    2: [2],              // Donna
+    3: [3],              // Capelli Marroni
+    4: [4],              // Capelli neri
+    5: [5],              // Capelli biondi
+    6: [6],              // Capelli grigi (come "capelli rossi" nel vecchio)   PELATO DA AGGIUNGERE IN CASO IN SEGUITO
+    7: [7],              // Capelli lunghi
+    8: [8],              // Capelli corti
+    9: [9],              // Etnia asiatico
+    10: [10],            // Etnia africano
+    11: [11],            // Etnia latino
+    12: [12],            // Etnia caucasica
+    13: [13],            // Occhi azzurri
+    14: [14],            // Occhi marroni
+    15: [15],            // Occhi verdi
+    16: [16],            // Con Barba
+    17: [17]             // Con Occhiali          CAPPELLO DA AGGIUNGERE IN CASO IN SEGUITO
+    //Domande sulle lettere presenti qui come ultime due domande
+    //le domande sono num attributes + 2
+  } as Record<number, number[]>
+}
 /**
  * TIPI
  */
@@ -257,7 +254,7 @@ export class FacialAttributesClassifier {
    * Calcola la probabilità massima per una domanda basandosi sugli indici corrispondenti
    */
   private getQuestionProbability(questionId: number, attributes: Attribute[]): number {
-    const indices = QUESTION_TO_INDICES[questionId];
+    const indices = CONFIG.questionToIndices[questionId];
     if (!indices || indices.length === 0) {
       return 0;
     }
@@ -299,8 +296,8 @@ export class FacialAttributesClassifier {
       if (inputName) {
         feeds[inputName] = tensor;
       }
-      
-      const output = await this.session.run(feeds);
+      console.log("feeds",this.session.inputNames);
+      const output = await this.session.run(feeds);  //EQUIVALENTE
       const outputName = this.session.outputNames && this.session.outputNames.length > 0 
         ? this.session.outputNames[0] 
         : Object.keys(output)[0];
@@ -337,16 +334,16 @@ export class FacialAttributesClassifier {
       // Costruisci l'array di risposte
       const answers: QuestionAnswer[] = [];
       const isVowel = this.startsWithVowel(imageName);
-      
-      for (let questionId = 0; questionId <= 18; questionId++) {
-        if (questionId === 17) {
+      const num_questions = 19
+      for (let questionId = 0; questionId <= num_questions; questionId++) {
+        if (questionId === (num_questions-1)) { //PENULTIMA DOMANDA = VOCALE
           // "Ha un nome che inizia con una vocale?" - usato per ethnicity
           answers.push({
             questionId,
             answer: isVowel,
             percentage: isVowel ? 100 : 0
           });
-        } else if (questionId === 18) {
+        } else if (questionId === (num_questions)) {
           // "Ha un nome che inizia con una consonante?"
           answers.push({
             questionId,
@@ -355,7 +352,7 @@ export class FacialAttributesClassifier {
           });
         } else {
           // Attributi dal modello
-          const indices = QUESTION_TO_INDICES[questionId];
+          const indices = CONFIG.questionToIndices[questionId];
           if (indices && indices.length > 0) {
             const probability = this.getQuestionProbability(questionId, attributes);
             const percentage = Math.round(probability * 100);
